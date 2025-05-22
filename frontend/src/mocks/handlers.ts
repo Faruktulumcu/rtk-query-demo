@@ -1,24 +1,12 @@
+// handlers.ts
 import { http, HttpResponse } from 'msw';
-import type { Book, User } from '@/common/types.ts';
+import type { Book, Review, User } from '@/common/types.ts';
 
-interface UserReview {
-  id: string;
-  bookId: string;
-  userId: string;
-  content: string;
-  isPublic: boolean;
-}
-
-// --- In-memory Data ---
 const users: User[] = [
   { id: '1', username: 'alice', token: 'token-alice' },
   { id: '2', username: 'bob', token: 'token-bob' },
   { id: '3', username: 'carol', token: 'token-carol' },
 ];
-
-interface UserBook extends Book {
-  userId: User['id'];
-}
 
 const books: Book[] = [
   {
@@ -26,48 +14,39 @@ const books: Book[] = [
     title: 'Clean Code',
     author: 'Robert C. Martin',
     isbn: '9783826655487',
-    thumbnailUrl:
-      'https://books.google.com/books/content?id=HGxKPgAACAAJ&printsec=frontcover&img=1&zoom=1&source=gbs_api',
+    thumbnailUrl: 'https://books.google.com/books/content?id=HGxKPgAACAAJ&printsec=frontcover&img=1&zoom=1&source=gbs_api',
   },
   {
     id: 'b2',
     title: 'The Pragmatic Programmer',
     author: 'Andrew Hunt',
     isbn: '9780132119177',
-    thumbnailUrl:
-      'https://books.google.com/books/content?id=5wBQEp6ruIAC&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api',
+    thumbnailUrl: 'https://books.google.com/books/content?id=5wBQEp6ruIAC&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api',
   },
 ];
 
-export const userBooks: UserBook[] = [
-  { ...books[0], userId: users[0].id },
-  { ...books[1], userId: users[0].id },
-  { ...books[0], userId: users[1].id },
+const userBooks = [
+  { userId: '1', book: books[0] },
+  { userId: '1', book: books[1] },
+  { userId: '2', book: books[1] },
 ];
 
-const reviews: UserReview[] = [
-  { id: 'r1', bookId: 'b1', userId: '1', content: 'Great book!', isPublic: true },
-  { id: 'r2', bookId: 'b1', userId: '1', content: 'My personal notes...', isPublic: false },
-  { id: 'r3', bookId: 'b2', userId: '2', content: 'Loved the patterns.', isPublic: true },
+const reviews: Review[] = [
+  { id: 'r1', bookId: 'b1', userId: '1', username: 'alice', content: 'Great book!', public: true, createdAt: '2025-05-01T11:45:00Z' },
+  { id: 'r2', bookId: 'b1', userId: '1', username: 'alice', content: 'My personal notes...', public: false, createdAt: '2025-05-02T20:13:00Z' },
+  { id: 'r3', bookId: 'b2', userId: '2', username: 'bob', content: 'Loved the patterns.', public: true, createdAt: '2025-05-03T14:53:00Z' },
 ];
 
-let nextReviewId = 4;
 let nextBookId = 3;
+let nextReviewId = 4;
 
-// --- Helpers ---
-function getUserFromAuthHeader(request: Request): User | undefined {
-  const auth = request.headers.get('Authorization');
-  const token = auth?.replace('Bearer ', '');
-  return users.find((u) => u.token === token);
-}
-
-function getUserOrThrowUnauthorized(request: Request): User {
-  const user = getUserFromAuthHeader(request);
+function getUserOrThrowUnauthorized(request: Request) {
+  const authHeader = request.headers.get('Authorization');
+  const user = users.find((u) => `Bearer ${u.token}` === authHeader);
   if (!user) throw new HttpResponse('Unauthorized', { status: 401 });
   return user;
 }
 
-// --- Handlers ---
 export const handlers = [
   // POST /api/login
   http.post('/api/login', async ({ request }) => {
@@ -82,68 +61,97 @@ export const handlers = [
   // GET /api/books
   http.get('/api/books', ({ request }) => {
     const user = getUserOrThrowUnauthorized(request);
-    return HttpResponse.json([...userBooks].filter((userBook) => userBook.userId === user.id));
+    const result = userBooks.filter((ub) => ub.userId === user.id).map((ub) => ub.book);
+    return HttpResponse.json(result);
   }),
 
   // POST /api/books
   http.post('/api/books', async ({ request }) => {
     const user = getUserOrThrowUnauthorized(request);
-    const book = (await request.json()) as Omit<Book, 'id'>;
-    const newBook: UserBook = {
-      ...book,
+    const body = await request.json() as Book;
+    const book = {
       id: `b${nextBookId++}`,
-      userId: user.id,
+      title: body.title,
+      author: body.author,
+      isbn: body.isbn,
+      thumbnailUrl: body.thumbnailUrl,
     };
-    userBooks.push(newBook);
-    return HttpResponse.json(newBook, { status: 201 });
+    books.push(book);
+    userBooks.push({ userId: user.id, book });
+    return new HttpResponse(JSON.stringify({ userId: user.id, book }), { status: 201 });
   }),
 
   // GET /api/books/:id
   http.get('/api/books/:id', ({ request, params }) => {
     const user = getUserOrThrowUnauthorized(request);
-    const { id } = params;
-    const book = userBooks.find((b) => b.id === id && b.userId === user.id);
-    if (!book) return new HttpResponse('Book not found', { status: 404 });
-    return HttpResponse.json(book);
+    const id = params.id as string;
+    const userBook = userBooks.find((ub) => ub.userId === user.id && ub.book.id === id);
+    if (!userBook) return new HttpResponse('Book not found', { status: 404 });
+    return HttpResponse.json(userBook.book);
   }),
 
-  // GET /api/books/:id/my-reviews
-  http.get('/api/books/:id/my-reviews', ({ request, params }) => {
+  // GET /api/books/:id/reviews
+  http.get('/api/books/:id/reviews', ({ request, params }) => {
     const user = getUserOrThrowUnauthorized(request);
-    const { id } = params;
-    const myReviews = reviews.filter((r) => r.bookId === id && r.userId === user.id);
-    return HttpResponse.json(myReviews);
+    const bookId = params.id as string;
+    const userReviews = reviews
+      .filter((r) => r.bookId === bookId && r.userId === user.id)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return HttpResponse.json(userReviews);
   }),
 
   // POST /api/books/:id/reviews
   http.post('/api/books/:id/reviews', async ({ request, params }) => {
     const user = getUserOrThrowUnauthorized(request);
-    const { id } = params;
-    const { content, isPublic } = (await request.json()) as { content: string; isPublic: boolean };
-    const newReview: UserReview = {
+    const bookId = params.id as string;
+    const { content, public: isPublic } = await request.json() as Partial<Review>;
+    const newReview = {
       id: `r${nextReviewId++}`,
-      bookId: id as string,
+      bookId,
       userId: user.id,
-      content,
-      isPublic,
+      username: user.username,
+      content: content || '',
+      public: Boolean(isPublic),
+      createdAt: new Date().toISOString(),
     };
     reviews.push(newReview);
-    return HttpResponse.json(newReview, { status: 201 });
-  }),
-
-  // GET /api/most-read-books
-  http.get('/api/most-read-books', () => {
-    const sorted = userBooks.sort((a, b) => parseInt(b.id, 10) - parseInt(a.id, 10)).slice(0, 5);
-    return HttpResponse.json(sorted);
+    return new HttpResponse(JSON.stringify(newReview), { status: 201 });
   }),
 
   // GET /api/books/:isbn/public-reviews
-  http.get('/api/books/:isbn/public-reviews', ({ params }) => {
-    const { isbn } = params;
-    const book = userBooks.find((b) => b.isbn === isbn);
+  http.get('/api/books/:isbn/public-reviews', ({ request, params }) => {
+    const user = getUserOrThrowUnauthorized(request);
+    const isbn = params.isbn as string;
+    const book = userBooks.find((ub) => ub.book.isbn === isbn)?.book;
     if (!book) return new HttpResponse('Book not found', { status: 404 });
 
-    const publicReviews = reviews.filter((r) => r.bookId === book.id && r.isPublic);
+    const publicReviews = reviews
+      .filter((r) => r.bookId === book.id && r.public && r.userId !== user.id)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
     return HttpResponse.json(publicReviews);
+  }),
+
+  // PUT /api/books/:bookId/reviews/:reviewId
+  http.put('/api/books/:bookId/reviews/:reviewId', async ({ request, params }) => {
+    const user = getUserOrThrowUnauthorized(request);
+    const { bookId, reviewId } = params;
+    const index = reviews.findIndex((r) => r.id === reviewId && r.bookId === bookId && r.userId === user.id);
+    if (index === -1) return new HttpResponse('Review not found or not owned by user', { status: 404 });
+
+    const body = await request.json() as Partial<Review>;
+    reviews[index] = { ...reviews[index], content: body.content || '', public: Boolean(body.public) };
+    return HttpResponse.json(reviews[index]);
+  }),
+
+  // DELETE /api/books/:bookId/reviews/:reviewId
+  http.delete('/api/books/:bookId/reviews/:reviewId', ({ request, params }) => {
+    const user = getUserOrThrowUnauthorized(request);
+    const { bookId, reviewId } = params;
+    const index = reviews.findIndex((r) => r.id === reviewId && r.bookId === bookId && r.userId === user.id);
+    if (index === -1) return new HttpResponse('Review not found or not owned by user', { status: 404 });
+
+    reviews.splice(index, 1);
+    return new HttpResponse(null, { status: 204 });
   }),
 ];
