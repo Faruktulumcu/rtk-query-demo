@@ -1,4 +1,4 @@
-import { useAddBookMutation, useGetBooksQuery } from '@/api/books-api';
+import { useAddBookMutation, useGetBooksQuery, usePrefetch } from '@/api/books-api';
 import { useNavigate } from 'react-router';
 import { BookCard } from '@/common/components';
 import { useState } from 'react';
@@ -10,6 +10,7 @@ export const BookListPage = () => {
   const navigate = useNavigate();
   const { data: books, isLoading, isError } = useGetBooksQuery();
   const [addBook] = useAddBookMutation();
+  const prefetchBookDetail = usePrefetch('getBookDetail');
 
   const [isModalOpen, setModalOpen] = useState(false);
 
@@ -51,7 +52,7 @@ export const BookListPage = () => {
       ) : books?.length ? (
         <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2">
           {books.map((book) => (
-            <div key={book.id} className="bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow">
+            <div key={book.id} onMouseEnter={() => prefetchBookDetail(book.id)} className="bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow">
               <BookCard book={book} onClick={goToDetail(book.id)} />
             </div>
           ))}

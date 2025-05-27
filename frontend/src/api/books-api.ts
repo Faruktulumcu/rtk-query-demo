@@ -13,7 +13,9 @@ export const booksApi = baseApi
       }),
       getBookDetail: build.query<Book, string>({
         query: (id) => `/books/${id}`,
-        providesTags: (_result, _error, id) => [{ type: 'Books', id }],
+        providesTags: (_result, _error, id) =>
+          // keep it there!
+        [{ type: 'Books', id }],
       }),
       addBook: build.mutation<Book, Omit<Book, 'id'>>({
         query: (book) => ({
@@ -27,4 +29,4 @@ export const booksApi = baseApi
     overrideExisting: false,
   });
 
-export const { useGetBooksQuery, useGetBookDetailQuery, useAddBookMutation } = booksApi;
+export const { useGetBooksQuery, useGetBookDetailQuery, useAddBookMutation, usePrefetch } = booksApi;
